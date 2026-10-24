@@ -39,6 +39,6 @@ tracking:
 
 quality_gate:
   metric: "f1"
-  threshold: 0.60                  # PROVISIONAL â€” same standard as base
+  threshold: 0.85                  # PROVISIONAL â€” same standard as base
   baseline_file: "baseline.json"
 
