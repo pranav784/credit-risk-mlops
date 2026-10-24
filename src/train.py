@@ -1,8 +1,9 @@
-﻿
+
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import joblib
@@ -83,6 +84,103 @@ def calculate_metrics(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
         "recall": float(recall_score(y_test, predictions, zero_division=0)),
         "accuracy": float(accuracy_score(y_test, predictions)),
         "roc_auc": float(roc_auc_score(y_test, probabilities)),
+    }
+
+
+def load_baseline_metrics(baseline_path: str | Path, metric_name: str) -> dict:
+    """Load reference baseline metrics from a stored JSON file."""
+    path = Path(baseline_path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Stored baseline file not found: {path}. "
+            "A valid baseline.json is required for CI quality gate evaluation."
+        )
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in baseline file {path}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Baseline file {path} must contain a JSON object mapping, got {type(data).__name__}."
+        )
+
+    metrics = data.get("baseline_metrics")
+    if metrics is None:
+        metrics = data.get("metrics")
+    if metrics is None:
+        metrics = data
+
+    if not isinstance(metrics, dict):
+        raise ValueError(
+            f"Metrics section in baseline file {path} must be a dictionary, got {type(metrics).__name__}."
+        )
+
+    if metric_name not in metrics:
+        raise KeyError(
+            f"Baseline file {path} missing required metric '{metric_name}'"
+        )
+
+    raw_val = metrics[metric_name]
+    try:
+        metric_val = float(raw_val)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Baseline metric '{metric_name}' in {path} must be a numeric value, got {raw_val!r}."
+        ) from exc
+
+    if not math.isfinite(metric_val):
+        raise ValueError(
+            f"Baseline metric '{metric_name}' in {path} must be a finite number, got {metric_val}."
+        )
+
+    if metric_name in {"f1", "precision", "recall", "accuracy", "roc_auc"}:
+        if not (0.0 <= metric_val <= 1.0):
+            raise ValueError(
+                f"Baseline metric '{metric_name}' in {path} must be between 0.0 and 1.0 inclusive, got {metric_val}."
+            )
+
+    return {
+        "model_name": data.get("model_name", "unknown") if isinstance(data, dict) else "unknown",
+        "metric_value": metric_val,
+        "all_metrics": metrics,
+    }
+
+
+def evaluate_quality_gate(
+    candidate_metrics: dict,
+    metric_name: str,
+    threshold: float,
+    baseline_path: str | Path | None = None,
+) -> dict:
+    """Evaluate candidate model against both an absolute floor and a stored baseline."""
+    candidate_value = float(candidate_metrics.get(metric_name, -1.0))
+    passed_threshold = bool(candidate_value >= threshold)
+
+    if baseline_path:
+        baseline_info = load_baseline_metrics(baseline_path, metric_name)
+        baseline_value = baseline_info["metric_value"]
+        delta = candidate_value - baseline_value
+        passed_baseline = bool(candidate_value >= baseline_value)
+        baseline_model = baseline_info["model_name"]
+    else:
+        baseline_value = None
+        delta = None
+        passed_baseline = True
+        baseline_model = None
+
+    passed = bool(passed_threshold and passed_baseline)
+    return {
+        "metric": metric_name,
+        "threshold": threshold,
+        "candidate_value": candidate_value,
+        "baseline_value": baseline_value,
+        "delta": delta,
+        "passed_threshold": passed_threshold,
+        "passed_baseline": passed_baseline,
+        "passed": passed,
+        "baseline_model": baseline_model,
     }
 
 
@@ -231,6 +329,11 @@ def train_and_evaluate(
                 mlflow.log_params({f"best_{k}": v for k, v in clean_params.items()})
                 mlflow.log_metric("cv_best_f1", float(best_score))
 
+    # Evaluate baseline model on the untouched holdout test set.
+    baseline_model = fitted_models[baseline_name]
+    baseline_metrics = calculate_metrics(baseline_model, X_test, y_test)
+    results[baseline_name]["test_metrics"] = baseline_metrics
+
     # Select using training-only cross-validation scores.
     best_name = max(results, key=lambda name: results[name]["cv_best_f1"])
     best_model = fitted_models[best_name]
@@ -238,6 +341,15 @@ def train_and_evaluate(
     # Evaluate the selected model once on the untouched holdout test set.
     final_metrics = calculate_metrics(best_model, X_test, y_test)
     results[best_name]["test_metrics"] = final_metrics
+
+    # Evaluate quality gate against stored baseline and absolute threshold.
+    baseline_file = config.quality_gate.baseline_file
+    gate_result = evaluate_quality_gate(
+        candidate_metrics=final_metrics,
+        metric_name=config.quality_gate.metric,
+        threshold=config.quality_gate.threshold,
+        baseline_path=baseline_file,
+    )
 
     report = {
         "data_path": str(data_path),
@@ -251,10 +363,14 @@ def train_and_evaluate(
         "selection_metric": "cross_validation_f1",
         "quality_gate_metric": config.quality_gate.metric,
         "quality_gate_threshold": config.quality_gate.threshold,
-        "quality_gate_passed": bool(
-            final_metrics.get(config.quality_gate.metric, -1)
-            >= config.quality_gate.threshold
-        ),
+        "quality_gate_passed": gate_result["passed"],
+        "quality_gate": gate_result,
+        "baseline_f1": gate_result["baseline_value"],
+        "candidate_f1": gate_result["candidate_value"],
+        "delta_f1": gate_result["delta"],
+        "passed_threshold": gate_result["passed_threshold"],
+        "passed_baseline": gate_result["passed_baseline"],
+        "baseline_test_metrics": baseline_metrics,
         "final_test_metrics": final_metrics,
         "models": results,
     }
@@ -273,6 +389,9 @@ def train_and_evaluate(
             mlflow.log_metric(
                 "quality_gate_passed", int(report["quality_gate_passed"])
             )
+            if gate_result["baseline_value"] is not None:
+                mlflow.log_metric("baseline_f1", gate_result["baseline_value"])
+                mlflow.log_metric("candidate_delta_f1", gate_result["delta"])
             mlflow.log_artifact(str(output_dir / "metrics.json"))
             mlflow.log_artifact(str(output_dir / "best_model.joblib"))
 
@@ -304,8 +423,21 @@ def main() -> None:
         output_dir=args.output_dir,
         use_mlflow=not args.no_mlflow,
     )
+
     print(json.dumps(report, indent=2))
-    if not report["quality_gate_passed"]:
+    gate = report["quality_gate"]
+    if report["quality_gate_passed"]:
+        print(
+            f"\n[QUALITY GATE PASSED] Candidate {gate['metric']}={gate['candidate_value']:.4f} "
+            f">= threshold {gate['threshold']:.4f} and >= baseline {gate['baseline_value']:.4f} "
+            f"(delta={gate['delta']:+.4f})"
+        )
+    else:
+        print(
+            f"\n[QUALITY GATE BLOCKED] Candidate {gate['metric']}={gate['candidate_value']:.4f} "
+            f"failed quality gate: passed_threshold={gate['passed_threshold']} (floor={gate['threshold']:.4f}), "
+            f"passed_baseline={gate['passed_baseline']} (baseline={gate['baseline_value']:.4f}, delta={gate['delta']:+.4f})"
+        )
         raise SystemExit(1)
 
 
