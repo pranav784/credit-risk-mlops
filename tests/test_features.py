@@ -66,3 +66,8 @@ def test_v2_missing_values_are_preserved_for_pipeline_imputation():
     result = engineer_features(df, CONFIG)
     assert len(result) == 1100
     assert result["Credit_Utilization"].isna().any()
+
+
+def test_demonstrating_automated_ci_test_failure():
+    """Demonstrating automated CI block when unit tests fail."""
+    assert False, "Deliberate test failure for CI/CD demonstration PR 3"
