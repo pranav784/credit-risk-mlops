@@ -1,0 +1,44 @@
+﻿# ===========================================================
+# ci.yaml  â€”  Lightweight configuration for CI/CD pipeline
+# ===========================================================
+# Optimized for speed: fewer hyperparameter options, fewer
+# CV folds. Uses the same pipeline code as base.yaml.
+
+data:
+  path: "credit_card_customers_v1.csv"
+  target_column: "High_Risk_Customer"
+  id_column: "Customer_ID"
+  test_size: 0.2
+  versions:
+    v1: "credit_card_customers_v1.csv"
+    v2: "credit_card_customers_v2.csv"
+
+random_seed: 42
+random_seeds: [42, 123, 456]
+
+features:
+  utilization_threshold: 0.8
+  late_payment_threshold: 5
+
+model:
+  baseline: "LogisticRegression"
+  candidates:
+    - name: "RandomForest"
+      params:
+        n_estimators: [10]
+        max_depth: [3]
+    - name: "GradientBoosting"
+      params:
+        n_estimators: [10]
+        learning_rate: [0.1]
+  cv_folds: 2
+
+tracking:
+  experiment_name: "credit-risk-ci"
+  tracking_uri: "sqlite:///mlflow.db"
+
+quality_gate:
+  metric: "f1"
+  threshold: 0.60                  # PROVISIONAL â€” same standard as base
+  baseline_file: "baseline.json"
+

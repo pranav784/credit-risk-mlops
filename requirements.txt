@@ -1,0 +1,9 @@
+﻿numpy
+pandas==3.1.0
+scikit-learn==1.9.1
+pydantic==2.14.1
+PyYAML==6.0.3
+mlflow==3.17.2
+joblib
+pytest==9.1.1
+dvc==3.67.1

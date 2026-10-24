@@ -1,0 +1,32 @@
+﻿name: Credit Risk CI Quality Gate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run automated tests
+        run: python -m pytest -q
+
+      - name: Train model and enforce quality gate
+        run: |
+          python -m src.train --config configs/ci.yaml --data credit_card_customers_v1.csv --output-dir artifacts/ci

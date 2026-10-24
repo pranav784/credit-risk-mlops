@@ -1,4 +1,5 @@
-.venv/
+﻿.venv/
+.venv312/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -7,6 +8,12 @@ __pycache__/
 mlruns/
 *.log
 .env
-.venv312/
+/artifacts/
+/mlflow.db
 /credit_card_customers_v1.csv
 /credit_card_customers_v2.csv
+/config.local
+/tmp
+/cache
+
+.venv-dvc/
