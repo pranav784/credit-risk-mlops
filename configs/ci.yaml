@@ -1,8 +1,9 @@
-﻿# ===========================================================
+# ===========================================================
 # ci.yaml  â€”  Lightweight configuration for CI/CD pipeline
 # ===========================================================
 # Optimized for speed: fewer hyperparameter options, fewer
 # CV folds. Uses the same pipeline code as base.yaml.
+# PR 1 candidate validation: passing dual quality gate.
 
 data:
   path: "credit_card_customers_v1.csv"
