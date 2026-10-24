@@ -8,6 +8,7 @@ from pathlib import Path
 
 import joblib
 import mlflow
+import mlflow.sklearn
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
@@ -375,13 +376,10 @@ def train_and_evaluate(
         "models": results,
     }
 
-    with (output_dir / "metrics.json").open("w", encoding="utf-8") as file:
-        json.dump(report, file, indent=2)
-
     joblib.dump(best_model, output_dir / "best_model.joblib")
 
     if use_mlflow:
-        with mlflow.start_run(run_name="final-selected-model"):
+        with mlflow.start_run(run_name="final-selected-model") as run:
             mlflow.log_param("selected_model", best_name)
             mlflow.log_metrics({
                 f"test_{key}": value for key, value in final_metrics.items()
@@ -392,8 +390,29 @@ def train_and_evaluate(
             if gate_result["baseline_value"] is not None:
                 mlflow.log_metric("baseline_f1", gate_result["baseline_value"])
                 mlflow.log_metric("candidate_delta_f1", gate_result["delta"])
+
+            registered_name = (
+                "CreditRiskModel" if report["quality_gate_passed"] else None
+            )
+            model_info = mlflow.sklearn.log_model(
+                sk_model=best_model,
+                name="model",
+                serialization_format="cloudpickle",
+                registered_model_name=registered_name,
+            )
+
+            report["mlflow_run_id"] = run.info.run_id
+            report["mlflow_model_uri"] = model_info.model_uri
+            report["registered_model_name"] = registered_name
+
+            with (output_dir / "metrics.json").open("w", encoding="utf-8") as file:
+                json.dump(report, file, indent=2)
+
             mlflow.log_artifact(str(output_dir / "metrics.json"))
             mlflow.log_artifact(str(output_dir / "best_model.joblib"))
+    else:
+        with (output_dir / "metrics.json").open("w", encoding="utf-8") as file:
+            json.dump(report, file, indent=2)
 
     return report
 
