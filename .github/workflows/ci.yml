@@ -26,8 +26,8 @@ jobs:
 
       - name: Download dataset release assets
         run: |
-          curl -sSfL "https://github.com/pranav784/credit-risk-mlops/releases/download/assignment-data-v1/credit_card_customers_v1.csv" -o credit_card_customers_v1.csv
-          curl -sSfL "https://github.com/pranav784/credit-risk-mlops/releases/download/assignment-data-v1/credit_card_customers_v2.csv" -o credit_card_customers_v2.csv
+          curl -sSfL "https://github.com/user-attachments/files/33908378/credit_card_customers_v1.csv" -o credit_card_customers_v1.csv
+          curl -sSfL "https://github.com/user-attachments/files/33908381/credit_card_customers_v2.csv" -o credit_card_customers_v2.csv
 
       - name: Run automated tests
         run: python -m pytest -q
